@@ -1,2 +1,2 @@
-strands>=0.1.0
-strands-tools>=0.1.0
+strands-agents>=0.1.0
+strands-agents-tools>=0.1.0
