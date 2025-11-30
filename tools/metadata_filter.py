@@ -6,6 +6,7 @@ from strands import tool
 import boto3
 from boto3.dynamodb.conditions import Attr
 import os
+from decimal import Decimal
 
 
 # DynamoDB 클라이언트 초기화 (서울 리전)
@@ -52,13 +53,13 @@ def filter_games(
             # DynamoDB의 IN 연산은 100개 제한이 있으므로 batch로 처리
             filter_expr = Attr('app_id').is_in(app_ids[:100])
 
-        # 가격 필터
+        # 가격 필터 (float → Decimal 변환)
         if max_price is not None:
-            price_filter = Attr('price').lte(max_price)
+            price_filter = Attr('price').lte(Decimal(str(max_price)))
             filter_expr = filter_expr & price_filter if filter_expr else price_filter
 
         if min_price is not None:
-            price_filter = Attr('price').gte(min_price)
+            price_filter = Attr('price').gte(Decimal(str(min_price)))
             filter_expr = filter_expr & price_filter if filter_expr else price_filter
 
         # 장르 필터 (모든 장르를 포함해야 함)
@@ -80,8 +81,17 @@ def filter_games(
 
         games = response['Items']
 
-        # 가격순 정렬 (낮은 가격 우선)
-        games.sort(key=lambda x: x.get('price', 999999))
+        # 가격순 정렬 (낮은 가격 우선, Decimal 처리)
+        games.sort(key=lambda x: float(x.get('price', Decimal('999999'))))
+
+        # Decimal을 float로 변환 (JSON 직렬화를 위해)
+        for game in games:
+            if 'price' in game:
+                game['price'] = float(game['price'])
+            # 다른 숫자 필드도 변환
+            for key in ['positive', 'negative', 'metacritic_score']:
+                if key in game and isinstance(game[key], Decimal):
+                    game[key] = int(game[key]) if game[key] % 1 == 0 else float(game[key])
 
         # 상위 N개만 반환
         return games[:limit]
@@ -104,7 +114,17 @@ def get_game_by_id(app_id: str) -> dict:
     try:
         table = dynamodb.Table('GameMetadata')
         response = table.get_item(Key={'app_id': app_id})
-        return response.get('Item', {})
+        game = response.get('Item', {})
+
+        # Decimal을 float/int로 변환
+        if game:
+            if 'price' in game:
+                game['price'] = float(game['price'])
+            for key in ['positive', 'negative', 'metacritic_score']:
+                if key in game and isinstance(game[key], Decimal):
+                    game[key] = int(game[key]) if game[key] % 1 == 0 else float(game[key])
+
+        return game
     except Exception as e:
         print(f"게임 조회 오류: {e}")
         return {}
