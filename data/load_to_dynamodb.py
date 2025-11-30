@@ -1,97 +1,51 @@
 """
-Kaggle Steam 게임 데이터를 DynamoDB에 로드하는 스크립트
-
-실행 방법:
-1. Kaggle에서 games.json 다운로드
-2. data/ 디렉토리에 games.json 배치
-3. python data/load_to_dynamodb.py 실행
+대용량 Kaggle Steam 게임 데이터를 DynamoDB에 로드하는 스크립트
+- pandas 제거
+- ijson 기반 스트리밍 파서 적용 (10GB 파일 대응)
+- DynamoDB batch_writer 로 대량 업로드
 """
+
 import boto3
-import pandas as pd
 import json
 import os
 from dotenv import load_dotenv
 from decimal import Decimal
+import ijson
 
 # 환경 변수 로드
 load_dotenv()
 
-# DynamoDB 설정 (서울 리전)
-AWS_REGION = os.getenv('AWS_REGION', 'ap-northeast-2')
-dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
-TABLE_NAME = 'GameMetadata'
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+TABLE_NAME = "GameMetadata"
 
 
 def create_table():
     """DynamoDB 테이블 생성"""
-    try:
-        # 기존 테이블 확인
-        existing_tables = [table.name for table in dynamodb.tables.all()]
+    existing_tables = [t.name for t in dynamodb.tables.all()]
 
-        if TABLE_NAME in existing_tables:
-            print(f"테이블 '{TABLE_NAME}'이 이미 존재합니다.")
-            response = input("기존 테이블을 삭제하고 다시 만드시겠습니까? (y/N): ")
-            if response.lower() == 'y':
-                table = dynamodb.Table(TABLE_NAME)
-                table.delete()
-                print("기존 테이블 삭제 중...")
-                table.wait_until_not_exists()
-                print("삭제 완료!")
-            else:
-                return dynamodb.Table(TABLE_NAME)
+    if TABLE_NAME in existing_tables:
+        print(f"테이블 '{TABLE_NAME}'이 이미 존재합니다.")
+        return dynamodb.Table(TABLE_NAME)
 
-        # 새 테이블 생성
-        print(f"테이블 '{TABLE_NAME}' 생성 중...")
-        table = dynamodb.create_table(
-            TableName=TABLE_NAME,
-            KeySchema=[
-                {'AttributeName': 'app_id', 'KeyType': 'HASH'}  # Partition Key
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'app_id', 'AttributeType': 'S'}  # String
-            ],
-            BillingMode='PAY_PER_REQUEST'  # On-demand 과금 (예상 못한 큰 비용 방지)
-        )
+    print(f"테이블 '{TABLE_NAME}' 생성 중...")
 
-        # 테이블 생성 대기
-        table.wait_until_exists()
-        print(f" 테이블 '{TABLE_NAME}' 생성 완료!")
-        return table
+    table = dynamodb.create_table(
+        TableName=TABLE_NAME,
+        KeySchema=[{"AttributeName": "app_id", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "app_id", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table.wait_until_exists()
 
-    except Exception as e:
-        print(f" 테이블 생성 오류: {e}")
-        raise
+    print("테이블 생성 완료!")
+    return table
 
-
-def load_data_from_json(file_path='data/games.json'):
-    """Kaggle JSON 데이터 로드"""
-    try:
-        print(f"\n데이터 파일 '{file_path}' 로드 중...")
-
-        # JSON 읽기 (dict 구조)
-        df = pd.read_json(file_path)
-
-        # JSON 최상위 key(appid)를 index가 아니라 컬럼으로 만들기
-        df.index.name = "appid"
-        df.reset_index(inplace=True)
-
-        print(f" {len(df)} 개 게임 데이터 로드 완료!")
-        print(f"컬럼: {list(df.columns)}")
-        return df
-
-    except FileNotFoundError:
-        print(f" 파일을 찾을 수 없습니다: {file_path}")
-        print("\nKaggle에서 데이터를 다운로드하세요:")
-        print("https://www.kaggle.com/datasets/trolukovich/steam-games-complete-dataset")
-        raise
-    except Exception as e:
-        print(f" 데이터 로드 오류: {e}")
-        raise
 
 def convert_floats_to_decimal(obj):
-    """재귀적으로 float을 Decimal로 변환"""
+    """재귀적으로 float → Decimal 변환"""
     if isinstance(obj, float):
-        return Decimal(str(obj))   # float → Decimal
+        return Decimal(str(obj))
     elif isinstance(obj, dict):
         return {k: convert_floats_to_decimal(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -99,100 +53,55 @@ def convert_floats_to_decimal(obj):
     else:
         return obj
 
-def upload_to_dynamodb(df, table, batch_size=25):
-    """데이터를 DynamoDB에 업로드 (배치 처리)"""
-    print(f"\nDynamoDB에 데이터 업로드 중...")
 
-    total_count = 0
-    error_count = 0
+def stream_json_games(file_path):
+    """10GB dict-of-dicts JSON을 스트리밍으로 읽기"""
+    print(f"스트리밍 로드 시작: {file_path}")
 
-    # 배치 처리 (DynamoDB는 최대 25개씩 배치 쓰기 가능)
+    with open(file_path, "r", encoding="utf-8") as f:
+        parser = ijson.items(f, "")
+        data = next(parser)  # 최상위 dict
+
+        for appid, game in data.items():
+            game = convert_floats_to_decimal(game)
+            game["app_id"] = str(appid)
+            yield game
+
+
+def upload_stream_to_dynamodb(stream, table):
+    """스트리밍된 데이터를 DynamoDB로 업로드"""
+    print("\nDynamoDB 업로드 시작..")
+    count = 0
+
     with table.batch_writer() as batch:
-        for idx, game in df.iterrows():
+        for item in stream:
             try:
-                # app_id가 없으면 인덱스 기반으로 생성
-                app_id = str(game.get('app_id', f"game_{idx}"))
-
-                # DynamoDB 아이템 구성
-                item = {
-                    'app_id': app_id,
-                    'name': str(game.get('name', 'Unknown')),
-                    'price': float(game.get('price', 0.0)),
-                    'genres': game.get('genres', []) if isinstance(game.get('genres'), list) else [],
-                    'categories': game.get('categories', []) if isinstance(game.get('categories'), list) else [],
-                    'positive_reviews': int(game.get('positive', 0)),
-                    'negative_reviews': int(game.get('negative', 0))
-                }
-
-                # tags 처리 (딕셔너리면 키만 추출)
-                tags = game.get('tags', {})
-                if isinstance(tags, dict):
-                    item['tags'] = list(tags.keys())[:10]  # 상위 10개 태그만
-                elif isinstance(tags, list):
-                    item['tags'] = tags[:10]
-                else:
-                    item['tags'] = []
-
-                # DynamoDB에 쓰기
-                item = convert_floats_to_decimal(item)
                 batch.put_item(Item=item)
-                total_count += 1
+                count += 1
 
-                # 진행 상황 출력
-                if total_count % 100 == 0:
-                    print(f"  진행: {total_count}/{len(df)} 게임 업로드 완료...")
+                if count % 1000 == 0:
+                    print(f"  진행: {count}개 업로드 완료")
 
             except Exception as e:
-                error_count += 1
-                if error_count <= 5:  # 처음 5개 에러만 출력
-                    print(f"  게임 '{game.get('name', 'Unknown')}' 업로드 실패: {e}")
+                print(f"업로드 실패: {e}")
 
-    print(f"\n 업로드 완료!")
-    print(f"   성공: {total_count - error_count} 개")
-    print(f"   실패: {error_count} 개")
-    return total_count - error_count
-
-
-def verify_upload(table, sample_size=5):
-    """업로드된 데이터 검증"""
-    print(f"\n데이터 검증 중 (샘플 {sample_size}개)...")
-
-    try:
-        response = table.scan(Limit=sample_size)
-        items = response.get('Items', [])
-
-        print(f"\n샘플 데이터:")
-        for i, item in enumerate(items, 1):
-            print(f"{i}. {item.get('name')} - ${item.get('price')} - {item.get('genres')}")
-
-        # 전체 아이템 수 (근사치)
-        print(f"\n전체 아이템 수 (근사치): {response.get('Count', 0)}")
-
-    except Exception as e:
-        print(f" 검증 오류: {e}")
+    print(f"\n업로드 완료! 총 {count}개 업로드됨.")
+    return count
 
 
 def main():
-    """메인 실행 함수"""
-    print("="*60)
-    print("Steam 게임 데이터 → DynamoDB 로더")
-    print("="*60)
+    print("=" * 60)
+    print(" Steam JSON → DynamoDB 로더 (Streaming 기반)")
+    print("=" * 60)
 
-    # 1. 테이블 생성
     table = create_table()
 
-    # 2. 데이터 로드
-    df = load_data_from_json()
+    stream = stream_json_games("data/games.json")
+    uploaded = upload_stream_to_dynamodb(stream, table)
 
-    # 3. DynamoDB 업로드
-    uploaded_count = upload_to_dynamodb(df, table)
-
-    # 4. 검증
-    verify_upload(table)
-
-    print("\n" + "="*60)
-    print(f" 모든 작업 완료! ({uploaded_count}개 게임 업로드)")
-    print("="*60)
+    print("=" * 60)
+    print(f" 전체 업로드 완료: {uploaded} 개")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
