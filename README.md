@@ -1,6 +1,6 @@
 # 게임 추천 AI Agent
 
-OpenAI 기반 LLM + DynamoDB + Vector DB를 사용한 하이브리드 게임 추천 시스템
+OpenAI GPT + AWS Bedrock Knowledge Base(Vector DB) + DynamoDB 기반 하이브리드 게임 추천 시스템
 
 ## 아키텍처
 
@@ -8,50 +8,63 @@ OpenAI 기반 LLM + DynamoDB + Vector DB를 사용한 하이브리드 게임 추
 사용자 질의
     ↓
 Agent (OpenAI GPT-4o 등)
-    ├─ retrieve (Vector DB) → 의미 기반 검색
-    └─ filter_games (DynamoDB) → 가격/장르 기반 필터링
+    ├─ retrieve (Bedrock Knowledge Base - Vector DB) → 의미 기반 검색
+    └─ filter_games (DynamoDB) → 가격·장르 기반 필터링
     ↓
-추천 결과 생성
+최종 추천 결과 생성
 ```
 
 ## 데이터 소스
 
-### 1. Vector DB (Knowledge Base)
+### 1. AWS Bedrock Knowledge Base (Vector DB)
 
-* 의미 기반 검색
-* `retrieve` tool 사용
-* 예: "커플 게임", "퍼즐 협동 게임"
+* 역할: 의미 기반 검색 (semantic search)
+* 사용: `retrieve("커플 게임")`, `"힐링 RPG"`, `"협동 퍼즐"`
+* 구성:
+
+  * Embedding 모델: Titan Text Embedding
+  * Vector Index: Bedrock Knowledge Base
+  * GameMetadata / Steam 게임 정보가 벡터화되어 저장된 DB
 
 ### 2. DynamoDB
 
-* 정확한 조건 필터링
+* 역할: 정확한 조건 필터링
 * 테이블: `GameMetadata`
-* 필터: 가격, 장르, 멀티플레이어 여부
+* 필터 요소:
+
+  * 가격 범위
+  * 장르
+  * 멀티플레이 여부
+  * 태그 기반 검색
+* Vector DB 결과를 기반으로 **후처리 필터링** 수행
+
+---
 
 ## 프로젝트 구조
 
 ```
 ai-agent/
-├── game_agent.py              # CLI 인터페이스
 ├── api.py                     # FastAPI 서버
+├── game_agent.py              # CLI 모드
 ├── tools/
-│   ├── __init__.py
-│   └── metadata_filter.py     # DynamoDB 필터링
+│   ├── metadata_filter.py     # DynamoDB 필터
+│   └── __init__.py
 ├── data/
-│   └── load_to_dynamodb.py    # Kaggle JSON → DynamoDB 업로드
+│   └── load_to_dynamodb.py    # Kaggle JSON → DynamoDB 적재
 ├── requirements.txt
 ├── .env.example
-├── .gitignore
 └── README.md
 ```
 
+---
+
 ## 설치 및 설정
 
-### 1. 가상환경 생성 및 활성화
+### 1. 가상환경 생성
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 ```
 
 ### 2. 패키지 설치
@@ -60,117 +73,82 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. 환경 변수 설정 (.env)
+### 3. .env 설정
 
 ```
 OPENAI_API_KEY=your_key
 AWS_ACCESS_KEY_ID=your_key
 AWS_SECRET_ACCESS_KEY=your_key
 AWS_REGION=ap-northeast-2
-KNOWLEDGE_BASE_ID=your_kb_id
+
+# Bedrock Knowledge Base (Vector DB)
+KNOWLEDGE_BASE_ID=kb-xxxx
+BEDROCK_EMBEDDING_MODEL=amazon.titan-embed-text-v2:0
 ```
 
 ### 4. Kaggle 데이터 준비
 
-1. Kaggle에서 Steam Games Dataset 다운로드
-   [https://www.kaggle.com/datasets/trolukovich/steam-games-complete-dataset](https://www.kaggle.com/datasets/trolukovich/steam-games-complete-dataset)
-2. `games.json` 파일을 `data/` 폴더에 위치
+`games.json`을 `data/`에 배치
 
-### 5. DynamoDB 데이터 업로드
+### 5. DynamoDB 업로드
 
 ```bash
 python data/load_to_dynamodb.py
 ```
 
-## FastAPI 서버 실행
+---
 
-아래 명령어로 서버를 실행한다:
+## FastAPI 서버 실행
 
 ```bash
 uvicorn api:app --reload --port 8000
 ```
 
-서버는 다음 엔드포인트를 제공한다:
+---
 
-```
-POST /recommend
-{
-  "query": "커플이랑 할 퍼즐 게임 추천해줘"
-}
-```
-
-## CLI 모드 실행
-
-### 대화형
+## CLI 실행
 
 ```bash
 python game_agent.py
 ```
 
-### 단일 쿼리
+---
 
-```bash
-python game_agent.py "2만원 이하 퍼즐 협동 게임"
-```
+## Bedrock Knowledge Base 사용 방식 (중요)
 
-## DynamoDB 스키마 예시
+현재 Agent는 자동으로 다음 작업을 수행한다:
 
-```json
-{
-  "app_id": "20200",
-  "name": "Galactic Bowling",
-  "price": 19.99,
-  "genres": ["Casual", "Indie", "Sports"],
-  "categories": ["Single-player", "Multi-player"],
-  "tags": ["Indie", "Casual", "Sports"],
-  "positive_reviews": 6,
-  "negative_reviews": 11
-}
-```
+1. 입력 자연어 → OpenAI LLM 분석
+2. Vector DB 검색 호출 (Bedrock Knowledge Base)
+
+   ```
+   retrieve("커플 협동 퍼즐 게임")
+   ```
+3. DynamoDB 필터 적용
+
+   ```
+   filter_games(max_price=20.0, genres=["Puzzle"])
+   ```
+4. 결과 결합 및 추천 생성
+
+이 과정은 **OpenAI 모델을 쓰더라도 유지됨**
+→ 벡터 검색은 Bedrock KB, 자연어 판단/추천 문장은 GPT-4o가 생성.
+
+---
 
 ## 트러블슈팅
 
-### 1. 포트 8000 점유 오류
+### Knowledge Base 오류
 
 ```
-Address already in use
+ResourceNotFoundException: Knowledge Base does not exist
 ```
 
-해결:
+필요 조치:
 
-```bash
-lsof -i :8000
-kill -9 <PID>
-```
+* Bedrock 콘솔 → Knowledge Base 생성
+* 데이터 소스 S3 연결 확인
+* Ingestion 수행 후 `ACTIVE` 상태인지 확인
+* `.env`의 `KNOWLEDGE_BASE_ID` 수정
 
-### 2. AWS credential 오류
-
-```
-Unable to locate credentials
-```
-
-해결: `.env` 파일 확인
-
-### 3. macOS 패키지 설치 오류
-
-```
-externally-managed-environment
-```
-
-해결: 가상환경 사용
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-## 개발 계획
-
-* 가격 범위 필터링 정확도 향상
-* Steam API 연동
-* 개인화 추천 강화
-* 웹 프론트엔드(React) 연동
-
-## 라이선스
-
-MIT
+---

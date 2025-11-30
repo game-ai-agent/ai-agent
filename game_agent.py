@@ -12,7 +12,7 @@ from tools.metadata_filter import filter_games, get_game_by_id
 import sys
 import os
 from dotenv import load_dotenv
-from strands.models import OpenAIModel
+from strands.models.openai import OpenAIModel
 
 # 환경 변수 로드
 load_dotenv()
