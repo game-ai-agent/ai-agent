@@ -7,10 +7,13 @@ import boto3
 from boto3.dynamodb.conditions import Attr
 import os
 from decimal import Decimal
+from dotenv import load_dotenv
 
+# 환경 변수 로드
+load_dotenv()
 
-# DynamoDB 클라이언트 초기화 (서울 리전)
-dynamodb = boto3.resource('dynamodb', region_name=os.getenv('AWS_REGION', 'ap-northeast-2'))
+# DynamoDB 클라이언트 초기화
+dynamodb = boto3.resource('dynamodb', region_name=os.getenv('AWS_REGION', 'us-west-2'))
 
 
 @tool
