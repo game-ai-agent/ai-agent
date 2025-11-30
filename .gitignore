@@ -120,3 +120,8 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# Data files (large datasets)
+data/games.json
+data/*.json
+data/*.csv

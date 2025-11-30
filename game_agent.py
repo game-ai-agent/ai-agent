@@ -1,263 +1,105 @@
-from strands import Agent, tool
+"""
+게임 추천 AI Agent (Hybrid 방식)
+
+아키텍처:
+- Bedrock Knowledge Base (Vector DB): 의미 기반 검색
+- DynamoDB: 정확한 필터링 (가격, 장르, 멀티플레이어)
+- Hybrid: retrieve로 후보 찾고 → filter_games로 정확한 조건 필터링
+"""
+from strands import Agent
 from strands_tools import http_request, retrieve
+from tools.metadata_filter import filter_games, get_game_by_id
 import sys
 import os
-import io
-import json
-from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+# 환경 변수 로드
+load_dotenv()
 
 
 # ============================================================================
-# WORKER AGENTS - 각 분야를 전문적으로 처리하는 작업자 에이전트들
+# 시스템 프롬프트: 하이브리드 추천 방식
 # ============================================================================
 
-class GameInfoWorker:
-    """게임 메타데이터 검색을 전문으로 하는 워커"""
+GAME_AGENT_PROMPT = """당신은 게임 추천 전문가입니다.
 
-    def __init__(self):
-        # 게임 메타데이터 전문가 프롬프트: 로컬 데이터베이스에서 게임 정보 검색
-        self.prompt = """당신은 게임 메타데이터 전문가입니다.
-로컬 데이터베이스에서 게임 정보를 검색하고 제공하는 것이 당신의 임무입니다.
-게임의 제목, 개발사, 출시년도, 장르, 플랫폼 등 상세한 메타데이터를 제공하세요.
+## 사용 가능한 도구들:
+
+1. **retrieve** - Bedrock Knowledge Base (Vector DB)에서 의미 기반 검색
+   - 사용자의 취향, 상황에 맞는 게임 찾기
+   - 예: "커플 게임", "힐링 게임", "협동 퍼즐"
+
+2. **filter_games** - DynamoDB에서 정확한 조건 필터링
+   - 가격, 장르, 멀티플레이어 등 명확한 조건으로 필터링
+   - 인자: max_price, min_price, genres, must_have_multiplayer
+   - 예: filter_games(max_price=20.0, genres=["Puzzle"])
+
+3. **get_game_by_id** - 특정 게임의 상세 정보 조회
+   - app_id로 게임 정보 가져오기
+
+4. **http_request** - 최신 뉴스, 리뷰 검색 (필요시)
+
+## 추천 프로세스 (하이브리드 방식):
+
+### 1단계: 사용자 질의 분석
+- 조건 추출: 가격, 장르, 플레이어 수, 난이도 등
+- 예: "커플이랑 할 퍼즐 게임 2만원 이하"
+  → 조건: 협동/2인 게임, 퍼즐 장르, 가격 ≤ $20
+
+### 2단계: Bedrock KB 검색 (의미 기반)
+- retrieve 도구로 관련 게임 검색
+- 사용자의 상황, 취향을 자연어로 검색
+- 예: retrieve("커플 협동 퍼즐 게임")
+
+### 3단계: DynamoDB 필터링 (정확한 조건)
+- filter_games로 정확한 조건 필터링
+- 가격, 장르 등 구체적인 조건 적용
+- 예: filter_games(max_price=20.0, genres=["Puzzle"], must_have_multiplayer=True)
+
+### 4단계: 추천 결과 생성
+
+**출력 형식**:
+```
+🎮 추천 게임:
+
+1. [게임 제목]
+   - 가격: $[가격] (약 [원화]원)
+   - 플레이어: [인원]
+   - 장르: [장르]
+   - 추천 이유: [상황에 맞는 이유]
+
+2. [게임 제목]
+   ...
+
+3. [게임 제목]
+   ...
+
+💡 더 정확한 추천을 원하시면:
+- 예산 범위를 알려주세요
+- 선호하는 장르를 알려주세요 (예: 퍼즐, 액션, 협동 등)
+- 게임 난이도를 알려주세요 (초급/중급/상급)
+```
+
+## 중요 규칙:
+
+1. **조건 부족해도 일단 추천** (빠른 만족감)
+   - 완벽한 정보가 없어도 최선의 추천 제공
+   - "💡 더 정확한 추천" 섹션으로 추가 정보 요청
+
+2. **가격 변환**
+   - DB는 USD 기준 → 원화로 변환 (1 USD = 약 1,300원)
+   - 사용자가 "2만원"이라고 하면 max_price=15.38 ($20 정도)
+
+3. **장르 매칭**
+   - 한글 장르 → 영어 장르로 변환
+   - 퍼즐 → Puzzle, 액션 → Action, 협동 → Cooperative
+
+4. **상위 3-5개 추천**
+   - 가성비 좋은 게임 우선
+   - 리뷰 평가 고려 (positive_reviews / negative_reviews)
+
+주어진 도구들을 적극 활용하여 최선의 추천을 제공하세요!
 """
-        self.agent = Agent(
-            model="us.amazon.nova-lite-v1:0",
-            system_prompt=self.prompt,
-            tools=[self._get_game_info_tool()]
-        )
-
-    @staticmethod
-    def _get_game_info_tool():
-        @tool
-        def get_game_info(keyword: str) -> dict:
-            """키워드나 제목으로 게임 메타데이터 검색"""
-            # 로컬 게임 데이터베이스 (실제 환경에서는 API나 DB로 대체)
-            game_database = {
-                "zelda": {
-                    "title": "The Legend of Zelda: Breath of the Wild",
-                    "developer": "Nintendo",
-                    "year": 2017,
-                    "genre": ["Action", "Adventure"],
-                    "platform": ["Switch", "Wii U"]
-                },
-                "elden ring": {
-                    "title": "Elden Ring",
-                    "developer": "FromSoftware",
-                    "year": 2022,
-                    "genre": ["Action RPG"],
-                    "platform": ["PC", "PS5", "Xbox"]
-                }
-            }
-            keyword_lower = keyword.lower()
-            for key, game in game_database.items():
-                if key in keyword_lower:
-                    return game
-            return {"error": f"'{keyword}'에 해당하는 게임을 찾을 수 없습니다"}
-        return get_game_info
-
-    def execute(self, task: str) -> str:
-        """워커에게 할당된 작업 실행"""
-        return self.agent(task)
-
-
-class KnowledgeBaseWorker:
-    """Knowledge Base 검색을 전문으로 하는 워커"""
-
-    def __init__(self):
-        # Knowledge Base 검색 전문가 프롬프트: AWS에 저장된 게임 정보 검색
-        self.prompt = """당신은 Knowledge Base 검색 전문가입니다.
-Knowledge Base에서 포괄적인 게임 정보를 검색하는 것이 당신의 임무입니다.
-retrieve 도구를 사용하여 Knowledge Base에서 상세한 정보를 찾아주세요.
-"""
-        self.agent = Agent(
-            model="us.amazon.nova-lite-v1:0",
-            system_prompt=self.prompt,
-            tools=[retrieve]
-        )
-
-    def execute(self, task: str) -> str:
-        """워커에게 할당된 작업 실행"""
-        return self.agent(task)
-
-
-class WebSearchWorker:
-    """웹 검색을 전문으로 하는 워커"""
-
-    def __init__(self):
-        # 웹 검색 전문가 프롬프트: 인터넷에서 최신 게임 정보 수집
-        self.prompt = """당신은 웹 검색 전문가입니다.
-인터넷에서 최신 게임 정보, 뉴스, 리뷰를 검색하는 것이 당신의 임무입니다.
-http_request 도구를 사용하여 웹에서 정보를 가져오세요.
-"""
-        self.agent = Agent(
-            model="us.amazon.nova-lite-v1:0",
-            system_prompt=self.prompt,
-            tools=[http_request]
-        )
-
-    def execute(self, task: str) -> str:
-        """워커에게 할당된 작업 실행"""
-        return self.agent(task)
-
-
-# ============================================================================
-# ORCHESTRATOR - 사용자 쿼리를 분석하고 워커들에게 작업 분배
-# ============================================================================
-
-class Orchestrator:
-    """워커들에게 작업을 분배하는 오케스트레이터"""
-
-    def __init__(self):
-        # 오케스트레이터 프롬프트: 사용자 질문을 분석하여 적절한 워커에게 작업 할당
-        self.prompt = """당신은 사용자 질문을 분석하고 어떤 워커에게 작업을 할당할지 결정하는 오케스트레이터입니다.
-
-사용 가능한 워커들:
-1. GameInfoWorker - 게임 메타데이터 검색 (제목, 개발사, 출시년도, 장르, 플랫폼)
-2. KnowledgeBaseWorker - Knowledge Base에서 포괄적인 게임 정보 검색
-3. WebSearchWorker - 최신 뉴스, 리뷰, 웹 정보 검색
-
-사용자 질문을 분석하고 다음 구조의 JSON 객체를 반환하세요:
-{
-    "workers": ["worker_name1", "worker_name2"],
-    "tasks": {
-        "worker_name1": "워커1을 위한 구체적인 작업",
-        "worker_name2": "워커2를 위한 구체적인 작업"
-    }
-}
-
-가이드라인:
-- 기본 게임 정보 질문: GameInfoWorker 사용
-- 상세한 게임 정보: KnowledgeBaseWorker 사용
-- 최신 뉴스/리뷰: WebSearchWorker 사용
-- 필요시 여러 워커 동시 할당 가능
-- 작업 설명은 구체적으로 작성
-
-JSON 객체만 반환하고 다른 텍스트는 포함하지 마세요.
-"""
-        self.agent = Agent(
-            model="us.amazon.nova-lite-v1:0",
-            system_prompt=self.prompt,
-            tools=[]
-        )
-
-    def plan(self, query: str) -> Dict[str, Any]:
-        """쿼리 분석 및 실행 계획 생성"""
-        try:
-            response = self.agent(f"사용자 질문: {query}")
-            # 응답에서 JSON 추출
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            if start != -1 and end > start:
-                json_str = response[start:end]
-                plan = json.loads(json_str)
-                return plan
-            else:
-                # JSON 파싱 실패 시 기본 계획 사용
-                return {
-                    "workers": ["KnowledgeBaseWorker"],
-                    "tasks": {"KnowledgeBaseWorker": query}
-                }
-        except Exception as e:
-            print(f"Orchestrator 계획 수립 오류: {e}")
-            # 에러 발생 시 기본 계획 사용
-            return {
-                "workers": ["KnowledgeBaseWorker"],
-                "tasks": {"KnowledgeBaseWorker": query}
-            }
-
-
-# ============================================================================
-# SYNTHESIZER - 워커들의 결과를 종합하여 최종 답변 생성
-# ============================================================================
-
-class Synthesizer:
-    """여러 워커의 결과를 하나의 일관된 답변으로 통합하는 신시사이저"""
-
-    def __init__(self):
-        # 신시사이저 프롬프트: 여러 소스의 정보를 통합하여 최종 답변 생성
-        self.prompt = """당신은 여러 출처의 정보를 결합하는 신시사이저입니다.
-
-당신의 임무:
-1. 여러 워커의 결과를 분석
-2. 상호 보완적인 정보를 결합
-3. 충돌하는 정보가 있다면 해결
-4. 일관되고 포괄적인 최종 답변 생성
-
-사용 가능한 모든 정보를 통합하여 잘 구조화된 답변을 제공하세요.
-"""
-        self.agent = Agent(
-            model="us.amazon.nova-lite-v1:0",
-            system_prompt=self.prompt,
-            tools=[]
-        )
-
-    def synthesize(self, query: str, results: Dict[str, str]) -> str:
-        """워커 결과들을 최종 답변으로 통합"""
-        # 신시사이저를 위한 결과 요약 준비
-        results_text = "\n\n".join([
-            f"=== {worker} 결과 ===\n{result}"
-            for worker, result in results.items()
-        ])
-
-        synthesis_query = f"""사용자 질문: {query}
-
-워커들의 결과:
-{results_text}
-
-이 결과들을 종합하여 포괄적인 답변을 작성해주세요.
-"""
-        return self.agent(synthesis_query)
-
-
-# ============================================================================
-# ORCHESTRATOR-WORKERS SYSTEM - 전체 시스템 통합
-# ============================================================================
-
-class OrchestratorWorkersSystem:
-    """Orchestrator, Workers, Synthesizer를 조율하는 메인 시스템"""
-
-    def __init__(self):
-        # 전문 워커들 초기화
-        self.workers = {
-            "GameInfoWorker": GameInfoWorker(),
-            "KnowledgeBaseWorker": KnowledgeBaseWorker(),
-            "WebSearchWorker": WebSearchWorker()
-        }
-
-        # Orchestrator와 Synthesizer 초기화
-        self.orchestrator = Orchestrator()
-        self.synthesizer = Synthesizer()
-
-    def process(self, query: str) -> str:
-        """Orchestrator-Workers 파이프라인을 통해 사용자 질문 처리"""
-        print("\n[Orchestrator] 질문 분석 및 실행 계획 수립 중...")
-
-        # Step 1: Orchestrator가 실행 계획 생성
-        plan = self.orchestrator.plan(query)
-        print(f"[Orchestrator] 계획: {json.dumps(plan, indent=2, ensure_ascii=False)}\n")
-
-        # Step 2: 할당된 워커들이 작업 실행
-        results = {}
-        for worker_name in plan.get("workers", []):
-            if worker_name in self.workers:
-                task = plan["tasks"].get(worker_name, query)
-                print(f"[{worker_name}] 작업 실행 중...")
-                try:
-                    result = self.workers[worker_name].execute(task)
-                    results[worker_name] = result
-                    print(f"[{worker_name}] 작업 완료.\n")
-                except Exception as e:
-                    print(f"[{worker_name}] 오류: {e}\n")
-                    results[worker_name] = f"오류: {e}"
-
-        # Step 3: Synthesizer가 결과 통합
-        if results:
-            print("[Synthesizer] 결과 통합 중...")
-            final_answer = self.synthesizer.synthesize(query, results)
-            print("[Synthesizer] 통합 완료.\n")
-            return final_answer
-        else:
-            return "워커들로부터 결과를 생성하지 못했습니다."
 
 
 # ============================================================================
@@ -269,22 +111,14 @@ def safe_input(prompt: str) -> str:
     try:
         return input(prompt).strip()
     except UnicodeDecodeError:
-        try:
-            if hasattr(sys.stdin, 'buffer'):
-                sys.stdin = io.TextIOWrapper(
-                    sys.stdin.buffer,
-                    encoding='utf-8',
-                    errors='replace'
-                )
-            return input(prompt).strip()
-        except (UnicodeDecodeError, UnicodeError):
-            try:
-                sys.stdout.write(prompt)
-                sys.stdout.flush()
-                line = sys.stdin.buffer.readline()
-                return line.decode('utf-8', errors='replace').strip()
-            except Exception:
-                raise
+        import io
+        if hasattr(sys.stdin, 'buffer'):
+            sys.stdin = io.TextIOWrapper(
+                sys.stdin.buffer,
+                encoding='utf-8',
+                errors='replace'
+            )
+        return input(prompt).strip()
 
 
 # ============================================================================
@@ -292,43 +126,53 @@ def safe_input(prompt: str) -> str:
 # ============================================================================
 
 def main():
-    """Orchestrator-Workers 게임 정보 시스템 실행"""
-    # 환경 변수에서 Knowledge Base ID 설정
-    kb_id = os.environ.get("KNOWLEDGE_BASE_ID")
+    """게임 추천 Agent 실행"""
+    # 환경 변수 확인
+    kb_id = os.getenv("KNOWLEDGE_BASE_ID")
     if not kb_id:
-        print("경고: KNOWLEDGE_BASE_ID 환경 변수가 설정되지 않았습니다")
+        print("⚠️  경고: KNOWLEDGE_BASE_ID 환경 변수가 설정되지 않았습니다")
         kb_id = input("Knowledge Base ID를 입력하세요 (건너뛰려면 Enter): ").strip()
         if kb_id:
             os.environ["KNOWLEDGE_BASE_ID"] = kb_id
 
-    # Orchestrator-Workers 시스템 초기화
-    system = OrchestratorWorkersSystem()
+    # Agent 초기화
+    print("\n게임 추천 Agent 초기화 중...")
+    agent = Agent(
+        model="us.amazon.nova-lite-v1:0",
+        system_prompt=GAME_AGENT_PROMPT,
+        tools=[retrieve, filter_games, get_game_by_id, http_request]
+    )
+    print("✅ 초기화 완료!\n")
 
     # 단일 쿼리 모드 (커맨드 라인 인자 사용)
     if len(sys.argv) > 1:
         query = " ".join(sys.argv[1:])
         try:
-            response = system.process(query)
-            print("="*60)
-            print("최종 답변:")
+            print(f"질문: {query}\n")
+            response = agent(query)
             print("="*60)
             print(response)
+            print("="*60)
         except Exception as e:
-            print(f"오류: {e}")
+            print(f"❌ 오류: {e}")
         return
 
     # 대화형 모드
     print("="*60)
-    print("Orchestrator-Workers 게임 정보 시스템")
+    print("🎮 게임 추천 AI Agent")
     print("="*60)
     print("종료하려면 'exit' 또는 'quit'를 입력하세요.\n")
+    print("예시 질문:")
+    print('  - "커플이랑 할 게임 추천해줘"')
+    print('  - "2만원 이하 퍼즐 게임"')
+    print('  - "멀티플레이어 캐주얼 게임"\n')
 
     while True:
         try:
-            query = safe_input("게임에 대해 질문하세요: ")
+            query = safe_input("질문: ")
 
-            if query.lower() in ['exit', 'quit', 'q']:
-                print("시스템을 종료합니다.")
+            if query.lower() in ['exit', 'quit', 'q', '종료']:
+                print("Agent를 종료합니다. 안녕히 가세요!")
                 break
 
             if not query:
@@ -336,16 +180,17 @@ def main():
                 continue
 
             try:
-                response = system.process(query)
+                print()  # 빈 줄
+                response = agent(query)
                 print("="*60)
-                print("최종 답변:")
+                print(response)
                 print("="*60)
-                print(f"{response}\n")
+                print()  # 빈 줄
             except Exception as e:
-                print(f"\n오류: {e}\n")
+                print(f"\n❌ 오류: {e}\n")
 
         except (KeyboardInterrupt, EOFError):
-            print("\n\n시스템을 종료합니다.")
+            print("\n\nAgent를 종료합니다. 안녕히 가세요!")
             break
 
 
