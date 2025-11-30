@@ -129,18 +129,35 @@ def main():
     """게임 추천 Agent 실행"""
     # 환경 변수 확인
     kb_id = os.getenv("KNOWLEDGE_BASE_ID")
+    use_kb = False
+
     if not kb_id:
-        print("⚠️  경고: KNOWLEDGE_BASE_ID 환경 변수가 설정되지 않았습니다")
-        kb_id = input("Knowledge Base ID를 입력하세요 (건너뛰려면 Enter): ").strip()
-        if kb_id:
-            os.environ["KNOWLEDGE_BASE_ID"] = kb_id
+        print("⚠️  Knowledge Base ID가 설정되지 않았습니다")
+        print("   DynamoDB만 사용하여 추천합니다 (Vector DB 없이)")
+    else:
+        use_kb = True
+        print(f"✅ Knowledge Base 연결: {kb_id}")
 
     # Agent 초기화
     print("\n게임 추천 Agent 초기화 중...")
+
+    # 서울 리전에서 사용 가능한 모델
+    # Claude 3 Haiku: 가장 빠르고 저렴
+    # Claude 3.5 Sonnet: 더 강력하지만 비쌈
+    model_id = "anthropic.claude-3-haiku-20240307-v1:0"
+
+    # Knowledge Base 사용 가능 여부에 따라 도구 선택
+    if use_kb:
+        tools = [retrieve, filter_games, get_game_by_id, http_request]
+        print("   모드: Hybrid (Vector DB + DynamoDB)")
+    else:
+        tools = [filter_games, get_game_by_id, http_request]
+        print("   모드: DynamoDB 전용")
+
     agent = Agent(
-        model="us.amazon.nova-lite-v1:0",
+        model=model_id,
         system_prompt=GAME_AGENT_PROMPT,
-        tools=[retrieve, filter_games, get_game_by_id, http_request]
+        tools=tools
     )
     print("✅ 초기화 완료!\n")
 

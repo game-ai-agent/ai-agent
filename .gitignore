@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# 중요: __init__.py는 코드 파일이므로 커밋해야 함
+!__init__.py
 env/
 venv/
 ENV/

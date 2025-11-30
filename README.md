@@ -60,13 +60,10 @@ pip install -r requirements.txt
 ### 3. 환경 변수 설정
 
 ```bash
-# .env.example을 .env로 복사
-cp .env.example .env
-
 # .env 파일 편집하여 실제 credential 입력
 # - AWS_ACCESS_KEY_ID
 # - AWS_SECRET_ACCESS_KEY
-# - AWS_REGION
+# - AWS_REGION (서울: ap-northeast-2)
 # - KNOWLEDGE_BASE_ID
 ```
 

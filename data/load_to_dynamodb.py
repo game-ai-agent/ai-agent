@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 # 환경 변수 로드
 load_dotenv()
 
-# DynamoDB 설정
-AWS_REGION = os.getenv('AWS_REGION', 'us-west-2')
+# DynamoDB 설정 (서울 리전)
+AWS_REGION = os.getenv('AWS_REGION', 'ap-northeast-2')
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 TABLE_NAME = 'GameMetadata'
 
@@ -54,11 +54,11 @@ def create_table():
 
         # 테이블 생성 대기
         table.wait_until_exists()
-        print(f"✅ 테이블 '{TABLE_NAME}' 생성 완료!")
+        print(f" 테이블 '{TABLE_NAME}' 생성 완료!")
         return table
 
     except Exception as e:
-        print(f"❌ 테이블 생성 오류: {e}")
+        print(f" 테이블 생성 오류: {e}")
         raise
 
 
@@ -67,20 +67,24 @@ def load_data_from_json(file_path='data/games.json'):
     try:
         print(f"\n데이터 파일 '{file_path}' 로드 중...")
 
-        # JSON Lines 형식 읽기 (한 줄에 하나의 JSON 객체)
-        df = pd.read_json(file_path, lines=True)
+        # JSON 읽기 (dict 구조)
+        df = pd.read_json(file_path)
 
-        print(f"✅ {len(df)} 개 게임 데이터 로드 완료!")
+        # JSON 최상위 key(appid)를 index가 아니라 컬럼으로 만들기
+        df.index.name = "appid"
+        df.reset_index(inplace=True)
+
+        print(f" {len(df)} 개 게임 데이터 로드 완료!")
         print(f"컬럼: {list(df.columns)}")
         return df
 
     except FileNotFoundError:
-        print(f"❌ 파일을 찾을 수 없습니다: {file_path}")
+        print(f" 파일을 찾을 수 없습니다: {file_path}")
         print("\nKaggle에서 데이터를 다운로드하세요:")
         print("https://www.kaggle.com/datasets/trolukovich/steam-games-complete-dataset")
         raise
     except Exception as e:
-        print(f"❌ 데이터 로드 오류: {e}")
+        print(f" 데이터 로드 오류: {e}")
         raise
 
 
@@ -129,9 +133,9 @@ def upload_to_dynamodb(df, table, batch_size=25):
             except Exception as e:
                 error_count += 1
                 if error_count <= 5:  # 처음 5개 에러만 출력
-                    print(f"  ⚠️  게임 '{game.get('name', 'Unknown')}' 업로드 실패: {e}")
+                    print(f"  게임 '{game.get('name', 'Unknown')}' 업로드 실패: {e}")
 
-    print(f"\n✅ 업로드 완료!")
+    print(f"\n 업로드 완료!")
     print(f"   성공: {total_count - error_count} 개")
     print(f"   실패: {error_count} 개")
     return total_count - error_count
@@ -153,7 +157,7 @@ def verify_upload(table, sample_size=5):
         print(f"\n전체 아이템 수 (근사치): {response.get('Count', 0)}")
 
     except Exception as e:
-        print(f"❌ 검증 오류: {e}")
+        print(f" 검증 오류: {e}")
 
 
 def main():
@@ -175,7 +179,7 @@ def main():
     verify_upload(table)
 
     print("\n" + "="*60)
-    print(f"✅ 모든 작업 완료! ({uploaded_count}개 게임 업로드)")
+    print(f" 모든 작업 완료! ({uploaded_count}개 게임 업로드)")
     print("="*60)
 
 
