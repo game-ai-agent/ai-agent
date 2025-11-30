@@ -125,18 +125,18 @@ def safe_input(prompt: str) -> str:
 # 메인 실행 함수
 # ============================================================================
 
-def main():
-    """게임 추천 Agent 실행"""
+def create_agent():
+    """게임 추천 Agent 생성 및 반환"""
     # 환경 변수 확인
     kb_id = os.getenv("KNOWLEDGE_BASE_ID")
     use_kb = False
 
     if not kb_id:
-        print("⚠️  Knowledge Base ID가 설정되지 않았습니다")
+        print("  Knowledge Base ID가 설정되지 않았습니다")
         print("   DynamoDB만 사용하여 추천합니다 (Vector DB 없이)")
     else:
         use_kb = True
-        print(f"✅ Knowledge Base 연결: {kb_id}")
+        print(f" Knowledge Base 연결: {kb_id}")
 
     # Agent 초기화
     print("\n게임 추천 Agent 초기화 중...")
@@ -159,7 +159,12 @@ def main():
         system_prompt=GAME_AGENT_PROMPT,
         tools=tools
     )
-    print("✅ 초기화 완료!\n")
+    print(" 초기화 완료!\n")
+    return agent
+
+def main():
+    """게임 추천 Agent 실행"""
+    agent = create_agent()
 
     # 단일 쿼리 모드 (커맨드 라인 인자 사용)
     if len(sys.argv) > 1:
@@ -171,7 +176,7 @@ def main():
             print(response)
             print("="*60)
         except Exception as e:
-            print(f"❌ 오류: {e}")
+            print(f" 오류: {e}")
         return
 
     # 대화형 모드
@@ -204,7 +209,7 @@ def main():
                 print("="*60)
                 print()  # 빈 줄
             except Exception as e:
-                print(f"\n❌ 오류: {e}\n")
+                print(f"\n 오류: {e}\n")
 
         except (KeyboardInterrupt, EOFError):
             print("\n\nAgent를 종료합니다. 안녕히 가세요!")

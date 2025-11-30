@@ -128,3 +128,10 @@ temp/
 data/games.json
 data/*.json
 data/*.csv
+# AI Agent
+.gemini/
+.agent/
+.antigravity/
+task.md
+implementation_plan.md
+walkthrough.md
