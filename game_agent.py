@@ -132,11 +132,11 @@ def create_agent():
     use_kb = False
 
     if not kb_id:
-        print("⚠️  Knowledge Base ID가 설정되지 않았습니다")
+        print(" Knowledge Base ID가 설정되지 않았습니다")
         print("   DynamoDB만 사용하여 추천합니다 (Vector DB 없이)")
     else:
         use_kb = True
-        print(f"✅ Knowledge Base 연결: {kb_id}")
+        print(f" Knowledge Base 연결: {kb_id}")
 
     # Agent 초기화
     print("\n게임 추천 Agent 초기화 중...")

@@ -15,7 +15,8 @@ import ijson
 # 환경 변수 로드
 load_dotenv()
 
-AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+# AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 TABLE_NAME = "GameMetadata"
 
