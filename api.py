@@ -13,17 +13,20 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS 설정 (모든 출처 허용)
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 프로덕션에서는 특정 도메인으로 제한 권장
+    allow_origins=[
+        "http://localhost:5173",
+        "*"  # 모든 출처 허용 (개발용)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # 세션별 Agent 저장소 (메모리)
-# 실제 프로덕션에서는 Redis나 DynamoDB 사용 권장
+# TODO: 실제 프로덕션에서는 Redis나 DynamoDB 사용 권장
 session_agents: Dict[str, any] = {}
 
 class QueryRequest(BaseModel):
