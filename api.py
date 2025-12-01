@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from game_agent import create_agent
 import os
@@ -10,6 +11,15 @@ app = FastAPI(
     title="Game Recommendation API",
     description="AI Agent 기반 게임 추천 API (세션별 메모리 지원)",
     version="2.0.0"
+)
+
+# CORS 설정 (모든 출처 허용)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 프로덕션에서는 특정 도메인으로 제한 권장
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 세션별 Agent 저장소 (메모리)
