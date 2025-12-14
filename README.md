@@ -2,6 +2,41 @@
 
 OpenAI GPT + AWS Bedrock Knowledge Base(Vector DB) + DynamoDB 기반 하이브리드 게임 추천 시스템
 
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/c6d6b279-9f6e-4e3e-9b03-2c4597201893" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/044a7382-f784-4133-9bf7-0f548bce828e" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/04a0cdac-f631-46fd-a5d4-d0838a938adf" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/b55b23d9-b3bc-4fbe-a6f7-c4284bb642c7" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/8b859b17-e6c7-4129-b7ba-28e67fe6a7d9" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/49a335f8-b8c5-488e-8946-b259cedb96be" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/eadc4a78-7db1-4bf0-86f7-cfc03cd5e448" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/a97b07ce-169d-4314-badd-c67ccbf94428" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/41a4831f-fd34-467b-9d30-7d4fce0c2840" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/172379b2-d801-49d9-a568-bbf49b32bdf1" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/be3b05fd-114e-47b8-8e95-e721700d27db" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/11deb9fa-50cf-4ea2-8c94-fecdb713bf30" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/17a96aba-2210-4707-a255-05dc8e514608" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/32a747e2-0d82-4273-a9df-304a9311ce18" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/4a90c2cc-c7b3-45cc-9498-badc54377fe5" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/62f7abba-4f46-4a24-a800-5e47fbd834e3" />
+
+<img width="2880" height="1621" alt="image" src="https://github.com/user-attachments/assets/f98cc049-3765-4943-8059-8da3853ab24f" />
+
+
 ## 아키텍처
 
 ```
